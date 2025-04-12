@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediPlan - 치료사 스케줄링 웹앱</title>
+    <!-- CDN: FullCalendar, Chart.js -->
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/main.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/main.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <!-- Google Fonts: Roboto -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* CSS 변수로 테마 관리 */
+        :root {
+            --bg-color: #f5f7fa;
+            --text-color: #333;
+            --button-bg: #40c4ff;
+            --button-text: #fff;
+            --card-bg: #fff;
+            --border-color: #ddd;
+        }
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --button-bg: #0288d1;
+            --button-text: #fff;
+            --card-bg: #2a2a2a;
+            --border-color: #444;
+        }
+
+        /* 기본 스타일 */
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2rem;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+        button, select {
+            padding: 12px 20px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: var(--button-bg);
+            color: var(--button-text);
+            min-width: 48px;
+            min-height: 48px;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        input, select {
+            padding: 10px;
+            font-size: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+        }
+        #scheduleForm {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #scheduleForm.show {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        #calendarView, #listView, #chartView {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        #calendarView.active, #listView.active, #chartView.active {
+            display: block;
+        }
+        #scheduleList {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #scheduleList th, #scheduleList td {
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            text-align: left;
+        }
+        #chartView canvas {
+            max-width: 100%;
+        }
+        #recommendation {
+            color: #2e7d32;
+            font-style: italic;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* 반응형 디자인 */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.5rem;
+            }
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            button, select, input {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            #calendarView .fc-toolbar {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MediPlan - 치료사 스케줄링</h1>
+        <!-- 제어 버튼 -->
+        <div class="controls">
+            <button onclick="toggleForm()">스케줄 추가</button>
+            <button onclick="showView('calendar')">캘린더 뷰</button>
+            <button onclick="showView('list')">리스트 뷰</button>
+            <button onclick="showView('chart')">차트 뷰</button>
+            <select id="therapistFilter" onchange="filterSchedules()">
+                <option value="">모든 치료사</option>
+                <option value="김민수">김민수</option>
+                <option value="이서연">이서연</option>
+                <option value="박지훈">박지훈</option>
+            </select>
+            <button onclick="exportToCSV()">CSV 내보내기</button>
+            <input type="file" id="importFile" accept=".csv" onchange="importFromCSV()">
+            <button onclick="toggleTheme()">다크모드 전환</button>
+        </div>
+        <!-- 스케줄 입력 폼 -->
+        <form id="scheduleForm">
+            <div class="form-group">
+                <label for="therapist">치료사</label>
+                <select id="therapist" required>
+                    <option value="김민수">김민수</option>
+                    <option value="이서연">이서연</option>
+                    <option value="박지훈">박지훈</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="patient">환자 이름</label>
+                <input type="text" id="patient" required>
+            </div>
+            <div class="form-group">
+                <label for="treatment">치료 유형</label>
+                <select id="treatment" required>
+                    <option value="물리치료">물리치료</option>
+                    <option value="재활치료">재활치료</option>
+                    <option value="마사지">마사지</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="date">날짜</label>
+                <input type="date" id="date" required>
+            </div>
+            <div class="form-group">
+                <label for="time">시간</label>
+                <input type="time" id="time" required>
+            </div>
+            <div class="form-group">
+                <label for="notes">메모</label>
+                <input type="text" id="notes">
+            </div>
+            <button type="submit" onclick="addSchedule()">저장</button>
+            <button type="button" onclick="toggleForm()">취소</button>
+            <div id="recommendation"></div>
+        </form>
+        <!-- 뷰 -->
+        <div id="calendarView" class="active"></div>
+        <div id="listView">
+            <table id="scheduleList">
+                <thead>
+                    <tr>
+                        <th>치료사</th>
+                        <th>환자</th>
+                        <th>치료 유형</th>
+                        <th>날짜</th>
+                        <th>시간</th>
+                        <th>메모</th>
+                        <th>액션</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div id="chartView">
+            <canvas id="ganttChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // 초기 데이터 (샘플)
+        let schedules = [
+            { id: 1, therapist: "김민수", patient: "최영희", treatment: "물리치료", date: "2025-04-14", time: "10:00", notes: "무릎 재활" },
+            { id: 2, therapist: "이서연", patient: "김철수", treatment: "마사지", date: "2025-04-14", time: "14:00", notes: "" },
+            { id: 3, therapist: "박지훈", patient: "이민아", treatment: "재활치료", date: "2025-04-15", time: "11:00", notes: "허리 통증" }
+        ];
+
+        // 로컬 스토리지 초기화
+        if (localStorage.getItem('schedules')) {
+            schedules = JSON.parse(localStorage.getItem('schedules'));
+        } else {
+            localStorage.setItem('schedules', JSON.stringify(schedules));
+        }
+
+        // 캘린더 초기화
+        const calendarEl = document.getElementById('calendarView');
+        const calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'dayGridMonth',
+            headerToolbar: {
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay'
+            },
+            events: schedules.map(s => ({
+                id: s.id,
+                title: `${s.therapist}: ${s.patient} (${s.treatment})`,
+                start: `${s.date}T${s.time}`,
+                extendedProps: s
+            })),
+            eventClick: function(info) {
+                if (confirm(`삭제하시겠습니까? ${info.event.title}`)) {
+                    schedules = schedules.filter(s => s.id != info.event.id);
+                    saveToLocalStorage();
+                    refreshViews();
+                }
+            },
+            eventMouseEnter: function(info) {
+                info.el.style.cursor = 'pointer';
+            }
+        });
+        calendar.render();
+
+        // 차트 초기화
+        let ganttChart = null;
+        function initChart() {
+            const ctx = document.getElementById('ganttChart').getContext('2d');
+            if (ganttChart) ganttChart.destroy();
+            ganttChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: schedules.map(s => `${s.therapist}: ${s.patient}`),
+                    datasets: [{
+                        label: '스케줄',
+                        data: schedules.map(s => new Date(`${s.date}T${s.time}`).getTime()),
+                        backgroundColor: '#40c4ff',
+                        barThickness: 20
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'hour' },
+                            title: { display: true, text: '시간' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 뷰 전환
+        function showView(view) {
+            document.querySelectorAll('#calendarView, #listView, #chartView').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.getElementById(`${view}View`).classList.add('active');
+            if (view === 'list') renderList();
+            if (view === 'chart') initChart();
+        }
+
+        // 폼 토글
+        function toggleForm() {
+            const form = document.getElementById('scheduleForm');
+            form.classList.toggle('show');
+            if (form.classList.contains('show')) {
+                suggestTime();
+            } else {
+                document.getElementById('recommendation').style.display = 'none';
+            }
+        }
+
+        // 스케줄 추가
+        function addSchedule() {
+            const therapist = document.getElementById('therapist').value;
+            const patient = document.getElementById('patient').value;
+            const treatment = document.getElementById('treatment').value;
+            const date = document.getElementById('date').value;
+            const time = document.getElementById('time').value;
+            const notes = document.getElementById('notes').value;
+
+            // 충돌 체크
+            const conflict = schedules.some(s => s.therapist === therapist && s.date === date && s.time === time);
+            if (conflict) {
+                alert('스케줄 충돌! 다른 시간을 선택하세요.');
+                return;
+            }
+
+            const newSchedule = {
+                id: schedules.length ? Math.max(...schedules.map(s => s.id)) + 1 : 1,
+                therapist, patient, treatment, date, time, notes
+            };
+            schedules.push(newSchedule);
+            saveToLocalStorage();
+            refreshViews();
+            toggleForm();
+        }
+
+        // 로컬 스토리지 저장
+        function saveToLocalStorage() {
+            localStorage.setItem('schedules', JSON.stringify(schedules));
+        }
+
+        // 뷰 갱신
+        function refreshViews() {
+            calendar.getEvents().forEach(event => event.remove());
+            schedules.forEach(s => {
+                calendar.addEvent({
+                    id: s.id,
+                    title: `${s.therapist}: ${s.patient} (${s.treatment})`,
+                    start: `${s.date}T${s.time}`,
+                    extendedProps: s
+                });
+            });
+            renderList();
+            if (document.getElementById('chartView').classList.contains('active')) {
+                initChart();
+            }
+        }
+
+        // 리스트 렌더링
+        function renderList() {
+            const tbody = document.querySelector('#scheduleList tbody');
+            tbody.innerHTML = '';
+            const filteredSchedules = filterSchedules();
+            filteredSchedules.forEach(s => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${s.therapist}</td>
+                    <td>${s.patient}</td>
+                    <td>${s.treatment}</td>
+                    <td>${s.date}</td>
+                    <td>${s.time}</td>
+                    <td>${s.notes}</td>
+                    <td><button onclick="deleteSchedule(${s.id})">삭제</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // 스케줄 삭제
+        function deleteSchedule(id) {
+            if (confirm('정말 삭제하시겠습니까?')) {
+                schedules = schedules.filter(s => s.id !== id);
+                saveToLocalStorage();
+                refreshViews();
+            }
+        }
+
+        // 필터링
+        function filterSchedules() {
+            const therapist = document.getElementById('therapistFilter').value;
+            return therapist ? schedules.filter(s => s.therapist === therapist) : schedules;
+        }
+
+        // CSV 내보내기
+        function exportToCSV() {
+            const headers = ['ID,치료사,환자,치료 유형,날짜,시간,메모'];
+            const rows = schedules.map(s => `${s.id},${s.therapist},${s.patient},${s.treatment},${s.date},${s.time},${s.notes}`);
+            const csv = headers.concat(rows).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'schedules.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // CSV 가져오기
+        function importFromCSV() {
+            const file = document.getElementById('importFile').files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const rows = text.split('\n').slice(1).filter(row => row.trim());
+                const newSchedules = rows.map(row => {
+                    const [id, therapist, patient, treatment, date, time, notes] = row.split(',');
+                    return { id: parseInt(id), therapist, patient, treatment, date, time, notes };
+                });
+                // 유효성 검사 (간단히)
+                const valid = newSchedules.every(s => s.therapist && s.patient && s.date && s.time);
+                if (!valid) {
+                    alert('잘못된 CSV 형식입니다.');
+                    return;
+                }
+                schedules = newSchedules;
+                saveToLocalStorage();
+                refreshViews();
+                alert('스케줄을 성공적으로 가져왔습니다.');
+            };
+            reader.readAsText(file);
+        }
+
+        // 다크모드 토글
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+        }
+
+        // 테마 초기화
+        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        // 시간대 추천 (간단한 규칙: 오전 선호)
+        function suggestTime() {
+            const timeInput = document.getElementById('time');
+            const recommendation = document.getElementById('recommendation');
+            timeInput.addEventListener('change', () => {
+                const hour = parseInt(timeInput.value.split(':')[0]);
+                if (hour >= 9 && hour <= 12) {
+                    recommendation.textContent = '오전 시간대는 예약 성공률이 높습니다!';
+                } else {
+                    recommendation.textContent = '오전 9시~12시를 추천합니다.';
+                }
+                recommendation.style.display = 'block';
+            });
+        }
+
+        // 초기 렌더링
+        showView('calendar');
+        renderList();
+    </script>
+</body>
+</html>
